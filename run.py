@@ -20,11 +20,16 @@ from wtforms.fields.html5 import EmailField
 from wtforms.csrf.session import SessionCSRF
 
 import requests, json
+import string
+import random
+import smtplib
+from email.mime.text import MIMEText
+from email.header import Header
 
 class ReverseProxied(object):
-    '''Wrap the application in this middleware and configure the 
-    front-end server to add these headers, to let you quietly bind 
-    this to a URL other than / and to an HTTP scheme that is 
+    '''Wrap the application in this middleware and configure the
+    front-end server to add these headers, to let you quietly bind
+    this to a URL other than / and to an HTTP scheme that is
     different than what is used locally.
 
     In nginx:
@@ -102,63 +107,95 @@ def oauth_authorized():
     if resp is None:
         flash(u'You denied the request to sign in.')
         return redirect(next_url)
-    
+
     r = remote_app.get('user', token=(resp['access_token'],''))
     if r.status != 200:
         flash(u'Request of /user information failed.', 'error')
         print r.text
         return redirect(next_url)
-    
+
     user = r.data
     if user['external']:
         flash('The user %s is flagged as external.' % user['username'], 'error')
         return redirect(next_url)
-    
+
     session['gitlab_token'] = (resp['access_token'], '')
     session['gitlab_user'] = user
     flash('You were signed in as %s' % user['username'])
     return redirect(next_url)
 
+def generate_password():
+    chars = string.letters + string.digits + string.punctuation
+    pwdSize = 10
+    return ''.join((random.choice(chars)) for x in range(pwdSize))
+
+def send_confirmation_mail(data, sender_name='Gitlab'):
+    msgcontent = """Hello {name},
+
+an Gitlab-Account was created for you!
+
+Please sign in under {GITLAB_BASE} with the credentials
+listed below and change your password!
+
+Username: {username}
+Password: {password}
+
+Cheers,
+{gitlab_user}
+""".format(GITLAB_BASE=app.config['GITLAB_BASE'], gitlab_user=sender_name, **data)
+
+    msg = MIMEText(msgcontent, 'plain')
+    subj = Header('An Gitlab account was created for you!')
+    msg['Subject'] = subj
+    msg['From'] = app.config['MAILSENDER']
+    msg['To'] = data['email']
+    msg['Content-Type'] = "text/html"
+    msg['Content-Transfer-Encoding'] = "quoted-printable"
+
+    try:
+        s = smtplib.SMTP('localhost')
+    except:
+        pass
+    else:
+        s.sendmail(app.config['MAILSENDER'], data['email'], msg.as_string())
+        s.quit()
 
 class RegistrationForm(Form):
     name = TextField('Name', [validators.Required()], render_kw={"placeholder": "Name"})
     username = TextField('Username', [validators.Required()], render_kw={"placeholder": "Username"})
     email = EmailField('Email Address', [validators.Required(), validators.Email()], render_kw={"placeholder": "Email"})
-    password = PasswordField('Initial Password', [
-        validators.Required(),
-        validators.EqualTo('confirm', message='Passwords must match')
-    ], render_kw={"placeholder": "Password"})
-    confirm = PasswordField('Repeat Password', render_kw={"placeholder": "Password"})
-    
+
     class Meta:
         csrf = True
         csrf_secret = app.config['CSRF_SECRET']
-    
+
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     token = get_gitlab_token()
     if token is None:
         return redirect(url_for('account', next=url_for('index')))
-    
-    
+
+
     form = RegistrationForm(request.form, meta={'csrf_context': session})
     if request.method == 'POST' and form.validate():
         data = {}
         data['name'] = form.name.data
         data['username'] = form.username.data
         data['email'] = form.email.data
-        data['password'] = form.password.data
+        data['password'] = generate_password()
         data['projects_limit'] = 0
+        data['confirm'] = False
         data['external'] = True
-        
+
         r = requests.post(app.config['GITLAB_BASE']+'/api/v3/users', data=json.dumps(data),
                           headers={'PRIVATE-TOKEN': app.config['GITLAB_ADMIN_TOKEN'], 'content-type': 'application/json'})
         if r.status_code == 201:
             flash('The user {} has been successfully created.'.format(form.username.data), 'success')
+            send_confirmation_mail(data, session['gitlab_user']['name'])
         else:
             flash('Problems when creating the user: {}'.format(r.json()['message']), 'error')
-    
+
     return render_template('index.html', form=form, user=session['gitlab_user'])
 
 @app.route('/test')
