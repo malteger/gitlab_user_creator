@@ -185,11 +185,11 @@ def index():
         data['email'] = form.email.data
         data['password'] = generate_password()
         data['projects_limit'] = 0
-        data['confirm'] = False
+        data['skip_confirmation'] = True
         data['external'] = True
 
-        r = requests.post(app.config['GITLAB_BASE']+'/api/v3/users', data=json.dumps(data),
-                          headers={'PRIVATE-TOKEN': app.config['GITLAB_ADMIN_TOKEN'], 'content-type': 'application/json'})
+        r = requests.post(app.config['GITLAB_BASE']+'/api/v4/users', data=json.dumps(data),
+                          headers={'Private-Token': app.config['GITLAB_ADMIN_TOKEN'], 'content-type': 'application/json'})
         if r.status_code == 201:
             flash('The user {} has been successfully created.'.format(form.username.data), 'success')
             send_confirmation_mail(data, session['gitlab_user']['name'])
