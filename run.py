@@ -145,7 +145,7 @@ Cheers,
 """.format(GITLAB_BASE=app.config['GITLAB_BASE'], gitlab_user=sender_name, **data)
 
     msg = MIMEText(msgcontent, 'plain')
-    subj = Header('An Gitlab account was created for you!')
+    subj = Header('A Gitlab account has been created for you!')
     msg['Subject'] = subj
     msg['From'] = app.config['MAILSENDER']
     msg['To'] = data['email']
